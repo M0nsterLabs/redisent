@@ -5,8 +5,14 @@
  * @copyright 2009-2012 Justin Poliey <justin@getglue.com>
  * @license http://www.opensource.org/licenses/ISC The ISC License
  * @package Redisent
- * 
+ *
  * @since Jan 3 2013
+ */
+
+/**
+ * Patch 2015-12-01
+ * Support for persistent connections: #persistent fragment in DSN
+ * https://github.com/joonas-fi/redisent/commit/05be10b035a753de965fd1dfcc71291fa4af2caf
  */
 
 namespace Redisent;
@@ -16,7 +22,7 @@ define('CRLF', sprintf('%s%s', chr(13), chr(10)));
 /**
  * Redisent, a Redis interface for the modest among us
  */
-class Redis 
+class Redis
 {
     /**
      * Socket connection to the Redis server
@@ -24,6 +30,13 @@ class Redis
      * @access private
      */
     private $__sock;
+
+	/**
+	 * Whether the connection is to be persistent or not
+	 * @var boolean
+	 * @access private
+	 */
+	private $__sockIsPersistent;
 
     /**
      * The structure representing the data source of the Redis server
@@ -52,13 +65,18 @@ class Redis
      * @param string $dsn The data source name of the Redis server
      * @param float $timeout The connection timeout in seconds
      */
-    public function __construct($dsn = 'redis://localhost:6379', $timeout = null) 
+    public function __construct($dsn = 'redis://localhost:6379', $timeout = null)
     {
         $this->dsn = parse_url($dsn);
+        $this->__sockIsPersistent = !empty($this->dsn['fragment']) && $this->dsn['fragment'] == 'persistent';
         $host = isset($this->dsn['host']) ? $this->dsn['host'] : 'localhost';
         $port = isset($this->dsn['port']) ? $this->dsn['port'] : 6379;
         $timeout = $timeout ?: ini_get("default_socket_timeout");
-        $this->__sock = @fsockopen($host, $port, $errno, $errstr, $timeout);
+
+	    $this->__sock = $this->__sockIsPersistent ?
+			@pfsockopen($host, $port, $errno, $errstr, $timeout) :
+			@fsockopen($host, $port, $errno, $errstr, $timeout);
+
         if ($this->__sock === FALSE) {
             throw new Exception("{$errno} - {$errstr}");
         }
@@ -67,9 +85,11 @@ class Redis
         }
     }
 
-    public function __destruct() 
+    public function __destruct()
     {
-        fclose($this->__sock);
+		if ($this->__sockIsPersistent == false) {
+			fclose($this->__sock);
+		}
     }
 
     /**
@@ -78,7 +98,7 @@ class Redis
      * @see uncork
      * @access public
      */
-    public function pipeline() 
+    public function pipeline()
     {
         $this->pipelined = TRUE;
         return $this;
@@ -89,7 +109,7 @@ class Redis
      * @see pipeline
      * @access public
      */
-    public function uncork() 
+    public function uncork()
     {
         /* Open a Redis connection and execute the queued commands */
         foreach ($this->queue as $command) {
@@ -117,7 +137,7 @@ class Redis
         }
     }
 
-    public function __call($name, $args) 
+    public function __call($name, $args)
     {
         /* Build the Redis unified protocol command */
         array_unshift($args, strtoupper($name));
@@ -135,7 +155,7 @@ class Redis
         }
     }
 
-    private function readResponse() 
+    private function readResponse()
     {
         /* Parse the response based on the reply identifier */
         $reply = trim(fgets($this->__sock, 512));
