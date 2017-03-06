@@ -1,4 +1,4 @@
-# Redisent
+# Redisent v1
 
 Redisent is a simple, no-nonsense interface to the [Redis](http://redis.io) data structure store for modest developers.
 It is designed to flexible and tolerant of changes to the Redis protocol.
